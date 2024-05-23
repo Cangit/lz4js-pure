@@ -31,3 +31,6 @@ CompressionCodecs[CompressionTypes.LZ4] = codec;
   - Improve and document error handling
   - Tests
   - Benchmarks
+
+#### Acknowledgement
+Based on work by [John Chadwick](https://github.com/johnwchadwick) and [Alexander Vukov](https://github.com/alex-vukov)
