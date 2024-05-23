@@ -1,0 +1,35 @@
+{
+  "name": "lz4js-pure",
+  "version": "1.0.0",
+  "description": "Fastest pure lz4js codec out there",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": "^20.13.0 || >=22.0.0"
+  },
+  "main": "dist/lz4.js",
+  "type": "module",
+  "types": "./dist/lz4.js",
+  "scripts": {
+    "build": "npm run lint && tsc -p tsconfig.json",
+    "lint": "eslint ./"
+  },
+  "prettier": {
+    "semi": true,
+    "singleQuote": true,
+    "useTabs": false,
+    "tabWidth": 2,
+    "printWidth": 80
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.3.0",
+    "@types/node": "^20.12.12",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-security": "^3.0.0",
+    "globals": "^15.3.0",
+    "prettier": "3.2.5",
+    "typescript": "^5.4.5",
+    "typescript-eslint": "^7.10.0"
+  },
+  "dependencies": {}
+}
