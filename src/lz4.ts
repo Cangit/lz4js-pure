@@ -1,4 +1,4 @@
-// lz4js-pure 230524
+// lz4js-pure 280524
 
 // Utility
 // --
@@ -47,8 +47,11 @@ function writeU32(b: Uint8Array, n: number, x: number): void {
 
 // Compression format parameters/constants
 const minMatch = 4;
-const minLength = 13;
-const searchLimit = 5;
+// const minLength = 13;
+const matchSearchLimit = 12;
+const minTrailingLitterals = 5;
+
+//const searchLimit = 5;
 const skipTrigger = 6;
 
 // Token constants
@@ -60,7 +63,7 @@ const runMask = (1 << runBits) - 1;
 // Frame descriptor flags
 const fdContentSize = 0x8;
 const fdBlockChksum = 0x10;
-const fdVersion = 0x40;
+const fdVersion = 0x40; // XXX 0x60 ?
 const fdVersionMask = 0xc0;
 
 // Block sizes
@@ -214,7 +217,7 @@ function decompressBlock(
       //dIndex += mLength;
       //} else {
       for (let i = start; i < end; ++i) {
-        dst[dIndex++] = dst[i];
+        dst[dIndex++] = dst[i] | 0;
       }
       //}
     } else {
@@ -229,7 +232,7 @@ function decompressBlock(
 
       const bEnd = start + mLength - copyX * mOffset;
       for (let i = start; i < bEnd; ++i) {
-        dst[dIndex++] = dst[i];
+        dst[dIndex++] = dst[i] | 0;
       }
     }
   }
@@ -250,90 +253,91 @@ function compressBlock(
   let dIndex = 0;
   let mAnchor = sIndex;
 
-  // Process only if block is large enough
-  if (sLength >= minLength) {
-    let searchMatchCount = (1 << skipTrigger) + 3;
+  let searchMatchCount = (1 << skipTrigger) + 3;
 
-    // Consume until last n literals (Lz4 spec limitation)
-    while (sIndex + minMatch < sEnd - searchLimit) {
-      const seq = readU32(src, sIndex);
-      let hash = hashU32(seq) >>> 0;
+  // Search for matches with a limit of matchSearchLimit bytes
+  // before the end of block (Lz4 spec limitation.)
+  while (sIndex <= sEnd - matchSearchLimit) {
+    const seq = readU32(src, sIndex);
+    let hash = hashU32(seq) >>> 0;
 
-      // Crush hash to 16 bits.
-      hash = (((hash >> 16) ^ hash) >>> 0) & 0xffff;
+    // Crush hash to 16 bits.
+    hash = (((hash >> 16) ^ hash) >>> 0) & 0xffff;
 
-      // Look for a match in the hashtable. NOTE: remove one; see below
-      let mIndex = hashTable[hash] - 1;
+    // Look for a match in the hashtable. NOTE: remove one; see below
+    let mIndex = hashTable[hash] - 1;
 
-      // Put pos in hash table. NOTE: add one so that zero = invalid
-      hashTable[hash] = sIndex + 1;
+    // Put pos in hash table. NOTE: add one so that zero = invalid
+    hashTable[hash] = sIndex + 1;
 
-      // Determine if there is a match (within range)
-      if (
-        mIndex < 0 ||
-        (sIndex - mIndex) >>> 16 > 0 ||
-        readU32(src, mIndex) !== seq
-      ) {
-        sIndex += searchMatchCount++ >> skipTrigger;
-        continue;
-      }
-
-      searchMatchCount = (1 << skipTrigger) + 3;
-
-      // Calculate literal count and offset
-      const literalCount = sIndex - mAnchor;
-      const mOffset = sIndex - mIndex;
-
-      // We've already matched one word, so get that out of the way
-      sIndex += minMatch;
-      mIndex += minMatch;
-
-      // Determine match length.
-      // N.B.: mLength does not include minMatch, Lz4 adds it back
-      // in decoding
-      let mLength = sIndex;
-      while (sIndex < sEnd - searchLimit && src[sIndex] === src[mIndex]) {
-        sIndex++;
-        mIndex++;
-      }
-      mLength = sIndex - mLength;
-
-      // Write token + literal count
-      const token = mLength < mlMask ? mLength : mlMask;
-      if (literalCount >= runMask) {
-        dst[dIndex++] = (runMask << mlBits) + token;
-        let n = literalCount - runMask;
-        while (n >= 0xff) {
-          dst[dIndex++] = 0xff;
-          n -= 0xff;
-        }
-        dst[dIndex++] = n;
-      } else {
-        dst[dIndex++] = (literalCount << mlBits) + token;
-      }
-
-      // Write literals
-      for (let i = mAnchor; i < mAnchor + literalCount; i++) {
-        dst[dIndex++] = src[i];
-      }
-
-      // Write offset
-      dst[dIndex++] = mOffset;
-      dst[dIndex++] = mOffset >> 8;
-
-      // Write match length
-      if (mLength >= mlMask) {
-        let n = mLength - mlMask;
-        while (n >= 0xff) {
-          dst[dIndex++] = 0xff;
-          n -= 0xff;
-        }
-        dst[dIndex++] = n;
-      }
-
-      // Move the anchor
-      mAnchor = sIndex;
+    // Determine if there is a match (within range)
+    if (
+      mIndex < 0 ||
+      (sIndex - mIndex) >>> 16 > 0 ||
+      readU32(src, mIndex) !== seq
+    ) {
+      sIndex += searchMatchCount++ >> skipTrigger;
+      continue;
     }
+
+    searchMatchCount = (1 << skipTrigger) + 3;
+
+    // Calculate literal count and offset
+    const literalCount = sIndex - mAnchor;
+    const mOffset = sIndex - mIndex;
+
+    // We've already matched one word, so get that out of the way
+    sIndex += minMatch;
+    mIndex += minMatch;
+
+    // Determine match length.
+    // N.B.: mLength does not include minMatch, Lz4 adds it back
+    // in decoding
+    let mLength = sIndex;
+    while (
+      sIndex < sEnd - minTrailingLitterals &&
+      src[sIndex] === src[mIndex]
+    ) {
+      sIndex++;
+      mIndex++;
+    }
+    mLength = sIndex - mLength;
+
+    // Write token + literal count
+    const token = mLength < mlMask ? mLength : mlMask;
+    if (literalCount >= runMask) {
+      dst[dIndex++] = (runMask << mlBits) + token;
+      let n = literalCount - runMask;
+      while (n >= 0xff) {
+        dst[dIndex++] = 0xff;
+        n -= 0xff;
+      }
+      dst[dIndex++] = n;
+    } else {
+      dst[dIndex++] = (literalCount << mlBits) + token;
+    }
+
+    // Write literals
+    for (let i = mAnchor; i < mAnchor + literalCount; i++) {
+      dst[dIndex++] = src[i];
+    }
+
+    // Write offset
+    dst[dIndex++] = mOffset;
+    dst[dIndex++] = mOffset >> 8;
+
+    // Write match length
+    if (mLength >= mlMask) {
+      let n = mLength - mlMask;
+      while (n >= 0xff) {
+        dst[dIndex++] = 0xff;
+        n -= 0xff;
+      }
+      dst[dIndex++] = n;
+    }
+
+    // Move the anchor
+    mAnchor = sIndex;
   }
 
   // Nothing was encoded
@@ -371,7 +375,7 @@ export function compress(src: Buffer): Uint8Array {
   const dst = new Uint8Array(maxSize);
 
   // Frame constants + checksum
-  dst.set(new Uint8Array([4, 34, 77, 24, 64, 112, 223]), 0);
+  dst.set(new Uint8Array([4, 34, 77, 24, 96, 112, 115]), 0);
   let dIndex = 7;
 
   // Write blocks
